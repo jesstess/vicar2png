@@ -1,0 +1,206 @@
+#!/usr/bin/python
+
+import png
+import struct
+import sys
+
+# TODO: other valid formats are:
+# "DUB": double-precision floating point
+# "COMP": a (real, imaginary) complex number pair.
+FORMATS = {"BYTE": 1, "HALF": 2, "FULL": 4}
+
+class VICARMetadata(object):
+    """
+    Contains VICAR metadata accessible as uppercase class attributes,
+    e.g.:
+
+    vicar.RECSIZE
+    vicar.FORMAT
+    """
+    def __init__(self, metadata):
+        """
+        metadata: A dictionary of VICAR label/value pairs.
+        """
+        for key, value in metadata.iteritems():
+            if value.isdigit():
+                value = int(value)
+            setattr(self, key.upper(), value)
+        # TODO: validate required fields
+
+
+def process_metadata(metadata_fd):
+    """
+    metadata_fd: A file descriptor open for reading in *non-binary* mode.
+
+    Returns an instance of VICARMetadata.
+    """
+    # A VICAR file must start with 'LBLSIZE=<integer label size>'.
+    lblsize_field = metadata_fd.read(len("LBLSIZE="))
+    if lblsize_field.upper() != "LBLSIZE=":
+        print >>sys.stderr, "Malformed VICAR file: doesn't start with LBLSIZE."
+        exit(1)
+
+    lblsize = ""
+    while True:
+        char = metadata_fd.read(1)
+        if char == " ":
+            break
+        else:
+            lblsize += char
+    try:
+        lblsize = int(lblsize)
+    except ValueError:
+        print >>sys.stderr, "Malformed VICAR file: contains non-integer LBLSIZE."
+        exit(1)
+
+    # Read in the rest of the VICAR metadata.
+    metadata_fd.seek(0)
+    metadata = metadata_fd.read(lblsize)
+    metadata_fd.close()
+
+    # Parse the metadata key/value pairs and put them in a VICAR
+    # metadata object.
+    #
+    # There are 3 label types:
+    # 1. Integer: A sequence of digits with an optional sign (+/-).
+    # 2. Real: A sequence of digits (0-9) including a decimal point,
+    #          an optional sign, and an optional exponent.
+    # 3. String: a sequence of ASCII characters enclosed in single
+    #            quotes, or with no quotes if there are no spaces in
+    #            the string.
+    #
+    # A keyword can contain multiple values by placing them inside
+    # parentheses as a comma-separated list.
+
+    metadata_dict = {}
+    has_lquote = has_lparen = False
+    tag_buf = ""
+    for char in metadata:
+        if char == "'":
+            if has_lquote and not has_lparen:
+                # We have a full string tag, save it.
+                tag, value = tag_buf.split("=")
+                metadata_dict[tag] = value
+
+                has_lquote = has_lparen = False
+                tag_buf = ""
+            else:
+                has_lquote = True
+        elif char == "(":
+            has_lparen = True
+            tag_buf += char
+        elif char == ")":
+            # We have a full parenthesized tag, save it.
+            tag, value = tag_buf.split("=")
+            metadata_dict[tag] = value
+
+            has_lquote = has_lparen = False
+            tag_buf = ""
+        elif char == " " and tag_buf and not (has_lquote or has_lparen):
+            # We have a full integer or real tag, save it.
+            tag, value = tag_buf.split("=")
+            metadata_dict[tag] = value
+
+            has_lquote = has_lparen = False
+            tag_buf = ""
+        elif char == " ":
+            continue
+        else:
+            tag_buf += char
+
+    return VICARMetadata(metadata_dict)
+
+
+def unsign(signed_data):
+    """
+    If FORMAT is BYTE, each pixel is an unsigned byte (0 - 255).
+
+    If FORMAT is HALF, each pixel is a 2 bytes, signed, 2's
+    complement, with the INFMT (HIGH or LOW) byte first.
+    """
+    return signed_data * 32768*2/4096.0
+
+
+def extract_image(vicar, image_fd):
+    """
+    vicar: an instance of VICARMetadata
+    image_fd: A file descriptor open for reading in *binary* mode.
+
+    Returns an array of arrays representing the rows of greyscale
+    pixels to be written to the output png.
+    """
+    # VICAR image area structure:
+    #
+    # Binary header
+    # Image data, broken into records of size RECSIZE.
+    #    Each record contains NBB bytes of binary prefix followed by
+    #    N1 * FORMAT bytes of pixel data.
+
+    # As far as we can tell the binary header isn't used for anything,
+    # so seek past it to the pixel data.
+    image_fd.seek(vicar.LBLSIZE + vicar.NLB * vicar.RECSIZE)
+
+    num_records = vicar.N2 * vicar.N3
+    pixels = []
+    for i in range(num_records):
+        # Skip prefix.
+        image_fd.read(vicar.NBB)
+
+        pixel_data = image_fd.read(vicar.N1 * FORMATS[vicar.FORMAT])
+        if vicar.FORMAT == "BYTE":
+            pixel_row = list(struct.unpack(">" + "B" * vicar.N1, pixel_data))
+            pixels.append(pixel_row)
+        else:
+            pixel_row = list(struct.unpack(">" + "h" * vicar.N1, pixel_data))
+            # For now we just handle BYTE and HALF.
+            pixels.append([unsign(elt) for elt in pixel_row])
+    return pixels
+
+
+def write_png(outfile, pixels, vicar):
+    try:
+        outf = open(outfile, "wb")
+    except (IOError, OSError), e:
+        print >>sys.stderr, "Could not open", outfile, "for writing."
+        print e.message
+        exit(1)
+
+    writer = png.Writer(width=vicar.N1, height=vicar.N1 * vicar.N3,
+                        greyscale=True, bitdepth=FORMATS[vicar.FORMAT]*8)
+    writer.write(outf, pixels)
+    outf.close()
+
+def process_vicar_file(infile, outfile):
+    try:
+        metadata_fd = open(infile, "r")
+    except (IOError, OSError), e:
+        print >>sys.stderr, "Could not open ", infile, "to process metadata."
+        print >>sys.stderr, e.message
+        exit(1)
+
+    vicar_metadata = process_metadata(metadata_fd)
+
+    try:
+        image_fd = open(infile, "rb")
+    except (IOError, OSError), e:
+        print >>sys.stderr, "Could not open ", infile, "to process image."
+        print >>sys.stderr, e.message
+        exit(1)
+
+    pixels = extract_image(vicar_metadata, image_fd)
+    write_png(outfile, pixels, vicar_metadata)
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print >>sys.stderr, "Please provide a VICAR filename."
+        exit(1)
+
+    infile = sys.argv[1]
+
+    if len(sys.argv) >= 3:
+        outfile = sys.argv[2]
+    else:
+        # If no outfile is provided,
+        outfile = infile.rsplit(".", 2)[0] + ".png"
+    process_vicar_file(infile, outfile)
