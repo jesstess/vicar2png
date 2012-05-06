@@ -34,13 +34,13 @@ vicar2png demo
 
 Once you've installed `vicar2png`, try converting the following files:
 
-*  An image of Jupiter from an Earth-Jupiter cruise during the Cassini mission:
+### An image of Jupiter from an Earth-Jupiter cruise during the Cassini mission:
 
    1. Download http://pdsimg.jpl.nasa.gov/data/cassini/cassini_orbiter/coiss_1004/data/1355070805_1355176231/N1355070913_1.IMG
    2. Convert from VICAR to PNG with `vicar2png N1355070913_1.IMG`
    3. Open `N1355070913_1.png` in an image viewer (`open N1355070913_1.png` will do the trick on OS X and many Linuxes)
 
-*  An encounter with Saturn's moon Phoebe from the Cassini-Huygens mission:
+### An encounter with Saturn's moon Phoebe from the Cassini-Huygens mission:
 
    1. Download http://pdsimg.jpl.nasa.gov/data/cassini/cassini_orbiter/coiss_2004/data/1465674475_1465709620/N1465674502_2.IMG
    2. Convert from VICAR to PNG with `vicar2png N1465674502_2.IMG`
