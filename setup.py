@@ -8,7 +8,7 @@ setup(
     scripts=['bin/vicar2png'],
     license='LICENSE.txt',
     description='VICAR-to-png image file converter.',
-    long_description=open('README.txt').read(),
+    long_description=open('README.md').read(),
     url='http://pypi.python.org/pypi/Vicar2Png/',
     install_requires=[
         "pypng",
