@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='Vicar2Png',
-    version='0.1dev',
+    version='0.2dev',
     author='Jessica McKellar',
     author_email='jesstess@mit.edu',
     scripts=['bin/vicar2png'],
